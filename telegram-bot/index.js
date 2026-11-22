@@ -73,7 +73,7 @@ bot.on("callback_query", async query => {
   if(data.startsWith("cat:")) {
     const category=data.slice(4);
     if(!bank[category]) return bot.answerCallbackQuery(query.id);
-    const questions=bank[category].map(q=>({...q})).sort(()=>Math.random()-0.5;
+    const questions=bank[category].map(q=>({...q})).sort(()=>Math.random()-0.5);
     sessions.set(userId,{category,questions,index:0,score:0,name:query.from.username||query.from.first_name||String(userId)});
     await bot.answerCallbackQuery(query.id);
     await bot.sendMessage(chatId,`Starting ${category}! Good luck 🚀`);
