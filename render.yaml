@@ -3,8 +3,8 @@ services:
     name: mcq-test-portal
     runtime: node
     plan: free
-    buildCommand: npm install && npm --prefix frontend install && npm --prefix backend install && npm --prefix frontend run build
-    startCommand: npm --prefix backend start
+        buildCommand: npm install --prefix frontend && npm install --prefix backend && npm run build
+        startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
@@ -14,6 +14,10 @@ services:
           property: connectionString
       - key: JWT_SECRET
         generateValue: true
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
       - key: ADMIN_PASSWORD
         sync: false
   - type: postgres
