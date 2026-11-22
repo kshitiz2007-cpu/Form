@@ -1,0 +1,29 @@
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
+import pg from 'pg';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+dotenv.config();
+const app=express(); app.use(cors()); app.use(express.json());
+const pool=new pg.Pool({connectionString:process.env.DATABASE_URL,ssl:process.env.NODE_ENV==='production'?{rejectUnauthorized:false}:false});
+const q=(sql,params=[])=>pool.query(sql,params);
+async function init(){
+ await q(`CREATE TABLE IF NOT EXISTS quizzes(id SERIAL PRIMARY KEY,title TEXT NOT NULL,category TEXT DEFAULT 'General',description TEXT DEFAULT '',status TEXT DEFAULT 'draft',timer_minutes INT DEFAULT 0,created_at TIMESTAMPTZ DEFAULT now())`);
+ await q(`CREATE TABLE IF NOT EXISTS questions(id SERIAL PRIMARY KEY,quiz_id INT REFERENCES quizzes(id) ON DELETE CASCADE,question TEXT NOT NULL,options JSONB NOT NULL,answer TEXT NOT NULL,points INT DEFAULT 1)`);
+ await q(`CREATE TABLE IF NOT EXISTS participants(id SERIAL PRIMARY KEY,name TEXT NOT NULL,telegram_username TEXT,created_at TIMESTAMPTZ DEFAULT now())`);
+ await q(`CREATE TABLE IF NOT EXISTS submissions(id SERIAL PRIMARY KEY,quiz_id INT REFERENCES quizzes(id),participant_id INT REFERENCES participants(id),answers JSONB NOT NULL,score INT DEFAULT 0,total INT DEFAULT 0,submitted_at TIMESTAMPTZ DEFAULT now())`);
+}
+const adminAuth=(req,res,next)=>{try{const token=(req.headers.authorization||'').replace('Bearer ','');req.admin=jwt.verify(token,process.env.JWT_SECRET);next()}catch{res.status(401).json({error:'Unauthorized'})}};
+app.get('/api/health',(_req,res)=>res.json({ok:true,service:'MCQ Test Portal'}));
+app.post('/api/admin/login',async(req,res)=>{if(!process.env.ADMIN_PASSWORD||req.body.password!==process.env.ADMIN_PASSWORD)return res.status(401).json({error:'Invalid password'});const token=jwt.sign({role:'admin'},process.env.JWT_SECRET,{expiresIn:'12h'});res.json({token})});
+app.get('/api/quizzes',async(_req,res)=>{try{const {rows}=await q("SELECT id,title,category,description,status,timer_minutes FROM quizzes WHERE status='published' ORDER BY id DESC");res.json(rows)}catch(e){res.status(500).json({error:'Database error'})}});
+app.get('/api/quizzes/:id',async(req,res)=>{try{const {rows}=await q("SELECT id,title,category,description,timer_minutes FROM quizzes WHERE id=$1 AND status='published'",[req.params.id]);if(!rows[0])return res.status(404).json({error:'Quiz not found'});const questions=await q('SELECT id,question,options,points FROM questions WHERE quiz_id=$1 ORDER BY id',[req.params.id]);res.json({...rows[0],questions:questions.rows})}catch(e){res.status(500).json({error:'Database error'})}});
+app.post('/api/quizzes/:id/submit',async(req,res)=>{try{const {name,telegram_username,answers}=req.body;if(!name?.trim())return res.status(400).json({error:'Name is required'});const quiz=await q("SELECT id FROM quizzes WHERE id=$1 AND status='published'",[req.params.id]);if(!quiz.rows[0])return res.status(404).json({error:'Quiz not found'});const person=await q('INSERT INTO participants(name,telegram_username) VALUES($1,$2) RETURNING id',[name.trim(),telegram_username||null]);const qs=await q('SELECT id,answer,points FROM questions WHERE quiz_id=$1',[req.params.id]);let score=0,total=0;for(const item of qs.rows){total+=item.points; if(String(answers?.[item.id]||'').toUpperCase()===item.answer.toUpperCase())score+=item.points;}const sub=await q('INSERT INTO submissions(quiz_id,participant_id,answers,score,total) VALUES($1,$2,$3,$4,$5) RETURNING id',[req.params.id,person.rows[0].id,JSON.stringify(answers||{}),score,total]);res.json({submissionId:sub.rows[0].id,score,total,percentage:total?Math.round(score/total*100):0})}catch(e){res.status(500).json({error:'Submission failed'})}});
+app.get('/api/admin/stats',adminAuth,async(_req,res)=>{try{const a=await q('SELECT COUNT(*) total FROM quizzes'),b=await q('SELECT COUNT(*) total FROM participants'),c=await q('SELECT COUNT(*) total FROM submissions'),d=await q('SELECT COALESCE(AVG(score*100.0/NULLIF(total,0)),0) avg FROM submissions');res.json({quizzes:+a.rows[0].total,participants:+b.rows[0].total,submissions:+c.rows[0].total,average:+d.rows[0].avg})}catch(e){res.status(500).json({error:'Database error'})}});
+app.post('/api/admin/quizzes',adminAuth,async(req,res)=>{try{const {title,category,description,status,timer_minutes,questions=[]}=req.body;if(!title)return res.status(400).json({error:'Title required'});const quiz=await q('INSERT INTO quizzes(title,category,description,status,timer_minutes) VALUES($1,$2,$3,$4,$5) RETURNING id',[title,category||'General',description||'',status||'draft',timer_minutes||0]);for(const question of questions){await q('INSERT INTO questions(quiz_id,question,options,answer,points) VALUES($1,$2,$3,$4,$5)',[quiz.rows[0].id,question.question,JSON.stringify(question.options),question.answer,question.points||1])}res.status(201).json({id:quiz.rows[0].id})}catch(e){res.status(500).json({error:'Could not create quiz'})}});
+app.get('/api/admin/submissions',adminAuth,async(_req,res)=>{try{const {rows}=await q('SELECT s.id,s.score,s.total,s.submitted_at,p.name,p.telegram_username,q.title quiz_title FROM submissions s JOIN participants p ON p.id=s.participant_id JOIN quizzes q ON q.id=s.quiz_id ORDER BY s.submitted_at DESC');res.json(rows)}catch(e){res.status(500).json({error:'Database error'})}});
+const __dirname=path.dirname(fileURLToPath(import.meta.url));const dist=path.resolve(__dirname,'../../frontend/dist');app.use(express.static(dist));app.get('*',(req,res)=>res.sendFile(path.join(dist,'index.html')));
+init().then(()=>{const port=process.env.PORT||4000;app.listen(port,()=>console.log('MCQ Portal API on '+port))}).catch(e=>{console.error('DB init error',e);process.exit(1)});
