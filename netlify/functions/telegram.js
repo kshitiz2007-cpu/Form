@@ -58,6 +58,8 @@ export default async (req) => {
   if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return new Response("Missing TELEGRAM_BOT_TOKEN", { status: 500 });
+  const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (webhookSecret && req.headers.get("x-telegram-bot-api-secret-token") !== webhookSecret) return new Response("Unauthorized", { status: 401 });
 
   try {
     const update = await req.json();
