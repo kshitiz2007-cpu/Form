@@ -3,8 +3,8 @@ services:
     name: mcq-test-portal
     runtime: node
     plan: free
-        buildCommand: npm install --prefix frontend && npm install --prefix backend && npm run build
-        startCommand: npm start
+    buildCommand: "npm install --prefix frontend && npm install --prefix backend && npm run build"
+    startCommand: "npm start"
     envVars:
       - key: NODE_ENV
         value: production
