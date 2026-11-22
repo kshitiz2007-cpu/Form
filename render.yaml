@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: mcq-test-portal
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm --prefix frontend install && npm --prefix backend install && npm --prefix frontend run build
+    startCommand: npm --prefix backend start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mcq-portal-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_PASSWORD
+        sync: false
+  - type: pserv
+    name: mcq-portal-db
+    plan: free
+    databaseName: mcqportal
+    user: mcqportal
